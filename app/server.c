@@ -90,7 +90,7 @@ int main() {
 	struct stat st;
 	char buf_send[MAX_BYTES];
 	int success_code = 200;
-
+	
 	if(stat(uri,&st) == -1) {
 		printf("Stat read %s %s\n",strerror(errno),__FUNCTION__);
 		success_code = 400;
