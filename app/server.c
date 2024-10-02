@@ -7,7 +7,7 @@
 #include <errno.h>
 #include <unistd.h>
 
-#include <fcntl.h>           
+#include <fcntl.h>
 #include <sys/stat.h>
 
 
@@ -17,7 +17,7 @@
 
 
 int recv_from_client(int client_conn_fd,char *buf) {
-	
+
 	int recv_bytes = recv(client_conn_fd,buf,MAX_BYTES,0);
 	if(recv_bytes == -1) {
 		fprintf(stdout,"Error %d %s %s\n",__LINE__,strerror(errno),__FUNCTION__);
@@ -36,7 +36,7 @@ void parse_into_lines(char **lines,int *line, char *buf) {
 
 
 	while(lines[*line] != NULL) {
-		printf("Line read %d %s\n",*line,lines[*line]);
+		//printf("Line read %d %s\n",*line,lines[*line]);
 		++*line;
 		lines[*line] = strtok(NULL,delim);
 	}
@@ -44,10 +44,10 @@ void parse_into_lines(char **lines,int *line, char *buf) {
 
 void create_echo_str(char *str,char *buf) {
 	int len = strlen(str);
-	
+
 	int success_code = 200;
 	sprintf(buf,"HTTP/1.1 %d OK\r\n\r\n",success_code);
-	sprintf(buf,"%sContent-Type: text/plain\r\n",buf);	 
+	sprintf(buf,"%sContent-Type: text/plain\r\n",buf);
 	sprintf(buf,"%sContent-Length: %d\r\n",buf,len);
 	sprintf(buf,"%s\r\n",buf);
 	sprintf(buf,"%s%s",buf,str);
@@ -56,7 +56,7 @@ void create_echo_str(char *str,char *buf) {
 }
 void create_response_from_server(char *uri,char *buf){
 	struct stat st;
-	
+
 	char temp_buf[MAX_BYTES];
 	int success_code = 200;
 
@@ -73,14 +73,14 @@ void create_response_from_server(char *uri,char *buf){
 	}
 
 	fprintf(stdout,"Parshing complete %d \n",i);
+	fprintf(stdout,"Dumping echo/* %s %s %s\n",tokens[i-2],tokens[i-1],__FUNCTION__);
 
 	if(i == 2 ){
 		if(strcmp(tokens[i-2],"echo") == 0){
 			create_echo_str(tokens[i-1],buf);
-			fprintf(stdout,"Dumping echo/* %s %s %s\n",tokens[i-2],tokens[i-1],__FUNCTION__);
+
 			return;
 		}
-		
 	}
 
 	if(stat(tokens[i-1],&st) == -1) {
@@ -153,11 +153,11 @@ int main() {
 	char* lines[MAX_LINES];
 	int line = 0;
 	parse_into_lines(lines,&line,buf_recv);
-	
+
 	char method[MAX_BYTES],uri[MAX_BYTES];
 	sscanf(lines[0],"%s %s",method,uri);
 	printf("Method %s Uri %s \n",method,uri);
-	
+
 
 	char buf_send[MAX_BYTES];
 	create_response_from_server(uri,buf_send);
