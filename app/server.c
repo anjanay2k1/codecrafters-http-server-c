@@ -7,6 +7,11 @@
 #include <errno.h>
 #include <unistd.h>
 
+#include <fcntl.h>           
+#include <sys/stat.h>
+
+
+#define MAX_LINES 104
 #define MAX_BYTES 8192
 
 int main() {
@@ -59,15 +64,42 @@ int main() {
 	printf("Client connected\n");
 
 	char buf_recv[MAX_BYTES];
+	int recv_bytes = recv(client_conn_fd,buf_recv,MAX_BYTES,0);
+	if(recv_bytes == 0) {
+		printf("Connection closed: %s %s\n", strerror(errno),__FUNCTION__);
+	}
+	printf("Recv bytes\n %s",buf_recv);
+	printf("\n");
+
+	char* lines[MAX_LINES];
+	int i = 0;
+	char delim[] = "\n";
+	lines[i] = strtok(buf_recv,delim);
+
+
+	while(lines[i] != NULL) {
+		printf("Line read %d %s\n",i,lines[i]);
+		++i;
+		lines[i] = strtok(NULL,delim);
+	}
+
+	char method[MAX_BYTES],uri[MAX_BYTES];
+	sscanf(lines[0],"%s %s",method,uri);
+	printf("Method %s Uri %s \n",method,uri);
+
+	struct stat st;
 	char buf_send[MAX_BYTES];
-    
 	int success_code = 200;
-	
 
-	sprintf(buf_send,"HTTP/1.1 %d OK\r\n\r\n",success_code);
+	if(stat(uri,&st) == -1) {
+		printf("Stat read %s %s\n",strerror(errno),__FUNCTION__);
+		success_code = 400;
+		sprintf(buf_send,"HTTP/1.1 %d Not Found\r\n\r\n",success_code);
+	} else {
+		sprintf(buf_send,"HTTP/1.1 %d OK\r\n\r\n",success_code);
+	}
+	printf("buf %s \n",buf_send);
 	send(client_conn_fd,buf_send,sizeof(buf_send),0);
-
-	//
 	close(server_fd);
 
 	return 0;
