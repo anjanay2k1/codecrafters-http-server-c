@@ -46,10 +46,7 @@ void create_echo_str(char *str,char *buf) {
 	int len = strlen(str);
 
 	int success_code = 200;
-	sprintf(buf,"HTTP/1.1 %d OK\r\n\r\nContent-Type: text/plain\r\n"
-	"Content-Length: %d\r\n\r\n%s",success_code,len,str);
-
-	//fprintf(stdout,"Final buf: %s\n",buf);
+	sprintf(buf,"HTTP/1.1 %d OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",success_code,len,str);
 }
 void create_response_from_server(char *uri,char *buf){
 	struct stat st;
@@ -64,13 +61,9 @@ void create_response_from_server(char *uri,char *buf){
 	tokens[i] = strtok(uri,delim);
 
 	while(tokens[i] != NULL) {
-		//fprintf(stdout,"Tokens[%d] %s\n",i,tokens[i]);
 		i++;
 		tokens[i] = strtok(NULL,delim);
 	}
-
-	//fprintf(stdout,"Parshing complete %d \n",i);
-	//fprintf(stdout,"Dumping echo/* %s %s %s\n",tokens[i-2],tokens[i-1],__FUNCTION__);
 
 	if(i == 2 ){
 		if(strcmp(tokens[i-2],"echo") == 0){
@@ -86,7 +79,6 @@ void create_response_from_server(char *uri,char *buf){
 	} else {
 		sprintf(buf,"HTTP/1.1 %d OK\r\n\r\n",success_code);
 	}
-	printf("buf %s \n",buf);
 }
 
 int main() {
@@ -140,11 +132,11 @@ int main() {
 
 	char buf_recv[MAX_BYTES];
 	if(recv_from_client(client_conn_fd,buf_recv) == 1) {
-		fprintf(stdout,"Exiting error in recv\n");
+		printf("Exiting error in recv\n");
 		exit(EXIT_FAILURE);
 	}
-	printf("Recv bytes\n %s",buf_recv);
-	printf("\n");
+	//printf("Recv bytes %s\n",buf_recv);
+	//printf("\n");
 
 	char* lines[MAX_LINES];
 	int line = 0;
@@ -152,12 +144,12 @@ int main() {
 
 	char method[MAX_BYTES],uri[MAX_BYTES];
 	sscanf(lines[0],"%s %s",method,uri);
-	printf("Method %s Uri %s \n",method,uri);
+	//printf("Method %s Uri %s \n",method,uri);
 
 
-	char buf_send[MAX_BYTES];
+	char buf_send[MAX_BYTES] = {0};
 	create_response_from_server(uri,buf_send);
-	send(client_conn_fd,buf_send,sizeof(buf_send),0);
+	int x = send(client_conn_fd,buf_send,MAX_BYTES,0);
 	close(server_fd);
 
 	return 0;
