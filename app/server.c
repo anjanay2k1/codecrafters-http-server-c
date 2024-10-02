@@ -78,7 +78,6 @@ void create_response_from_server(char *uri,char *buf){
 	if(i == 2 ){
 		if(strcmp(tokens[i-2],"echo") == 0){
 			create_echo_str(tokens[i-1],buf);
-
 			return;
 		}
 	}
