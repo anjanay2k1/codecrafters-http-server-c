@@ -50,7 +50,7 @@ void create_echo_str(char *str,char *buf) {
 	sprintf(buf,"%sContent-Type: text/plain\r\n",buf);	 
 	sprintf(buf,"%sContent-Length: %d\r\n",buf,len);
 	sprintf(buf,"%s\r\n",buf);
-	sprintf(buf,"%s %s",buf,str);
+	sprintf(buf,"%s%s",buf,str);
 
 	fprintf(stdout,"Final buf: %s\n",buf);
 }
