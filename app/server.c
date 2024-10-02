@@ -46,16 +46,9 @@ void create_echo_str(char *str,char *buf) {
 	int len = strlen(str);
 
 	int success_code = 200;
-	sprintf(buf,"HTTP/1.1 %d OK\r\n\r\n",success_code);
-	printf("%s\n",buf);
-	sprintf(buf,"%sContent-Type: text/plain\r\n",buf);
-	printf("%s\n",buf);
-	sprintf(buf,"%sContent-Length: %d\r\n",buf,len);
-	printf("%s\n",buf);
-	sprintf(buf,"%s\r\n",buf);
-	printf("%s\n",buf);
-	sprintf(buf,"%s%s",buf,str);
-	printf("%s\n",buf);
+	sprintf(buf,"HTTP/1.1 %d OK\r\n\r\nContent-Type: text/plain\r\n"
+	"Content-Length: %d\r\n\r\n%s",success_code,len,str);
+
 	fprintf(stdout,"Final buf: %s\n",buf);
 }
 void create_response_from_server(char *uri,char *buf){
