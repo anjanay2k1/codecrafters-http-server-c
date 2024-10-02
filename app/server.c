@@ -90,10 +90,10 @@ int main() {
 	struct stat st;
 	char buf_send[MAX_BYTES];
 	int success_code = 200;
-	
+
 	if(stat(uri,&st) == -1) {
 		printf("Stat read %s %s\n",strerror(errno),__FUNCTION__);
-		success_code = 400;
+		success_code = 404;
 		sprintf(buf_send,"HTTP/1.1 %d Not Found\r\n\r\n",success_code);
 	} else {
 		sprintf(buf_send,"HTTP/1.1 %d OK\r\n\r\n",success_code);
