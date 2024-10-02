@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
@@ -14,7 +15,7 @@
 #define MAX_LINES 104
 #define GET_URI_PARAMS 10
 #define MAX_BYTES 8192
-
+ 
 
 int recv_from_client(int client_conn_fd,char *buf) {
 
@@ -42,13 +43,14 @@ void parse_into_lines(char **lines,int *line, char *buf) {
 	}
 }
 
-void create_echo_str(char *str,char *buf) {
+void create_custome_response(char *str,char *buf) {
 	int len = strlen(str);
 
 	int success_code = 200;
 	sprintf(buf,"HTTP/1.1 %d OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",success_code,len,str);
 }
-void create_response_from_server(char *uri,char *buf){
+
+void create_response_for_endpoint(char *uri,char** lines,int maxlines,char *buf){
 	struct stat st;
 
 	char temp_buf[MAX_BYTES];
@@ -67,10 +69,55 @@ void create_response_from_server(char *uri,char *buf){
 
 	if(i == 2 ){
 		if(strcmp(tokens[i-2],"echo") == 0){
-			create_echo_str(tokens[i-1],buf);
+			create_custome_response(tokens[i-1],buf);
 			return;
 		}
 	}
+
+	if(strcasecmp(tokens[i-1],"User-agent") == 0) {	
+		
+		printf("User-agent searched \n");
+		for(int i = 1 ; i < maxlines; i++) {
+		
+			if(strcasestr(lines[i],"User-agent") != NULL) {
+		
+				printf("User-agent found \n");
+				char dup_str[MAX_BYTES] = {0};
+				strcpy(dup_str,lines[i]);
+				printf("User agent string %s\n",dup_str);
+
+				char *user_agent_val = strtok(dup_str,":");
+				printf("User-agent after first parshing %s\n",user_agent_val);
+		
+				if(user_agent_val != NULL) {
+		
+					user_agent_val = strtok(NULL,":");
+					printf("User-agent after sec parshing %s\n",user_agent_val);
+					
+					char newstr[MAX_BYTES] = {'\0'};
+					int j = 0;
+					while(*user_agent_val != '\r') {
+		
+						if(isspace(*user_agent_val)){
+							++user_agent_val;
+							continue;
+						}
+		
+						newstr[j] = *user_agent_val;
+						user_agent_val++;
+						j++;
+					}
+					create_custome_response(newstr,buf);
+					printf("Create custom response user %s buf %s\n",newstr,buf);
+					
+	                return;				
+				}
+			}
+
+		}
+
+	}
+
 
 	if(stat(tokens[i-1],&st) == -1) {
 		printf("Stat read %s %s\n",strerror(errno),__FUNCTION__);
@@ -135,8 +182,8 @@ int main() {
 		printf("Exiting error in recv\n");
 		exit(EXIT_FAILURE);
 	}
-	//printf("Recv bytes %s\n",buf_recv);
-	//printf("\n");
+	printf("Recv bytes %s\n",buf_recv);
+	printf("\n");
 
 	char* lines[MAX_LINES];
 	int line = 0;
@@ -144,12 +191,12 @@ int main() {
 
 	char method[MAX_BYTES],uri[MAX_BYTES];
 	sscanf(lines[0],"%s %s",method,uri);
-	//printf("Method %s Uri %s \n",method,uri);
+	printf("Method %s Uri %s \n",method,uri);
 
 
 	char buf_send[MAX_BYTES] = {0};
-	create_response_from_server(uri,buf_send);
-	int x = send(client_conn_fd,buf_send,MAX_BYTES,0);
+	create_response_for_endpoint(uri,lines,line,buf_send);
+	
 	close(server_fd);
 
 	return 0;
