@@ -49,7 +49,7 @@ void create_echo_str(char *str,char *buf) {
 	sprintf(buf,"HTTP/1.1 %d OK\r\n\r\nContent-Type: text/plain\r\n"
 	"Content-Length: %d\r\n\r\n%s",success_code,len,str);
 
-	fprintf(stdout,"Final buf: %s\n",buf);
+	//fprintf(stdout,"Final buf: %s\n",buf);
 }
 void create_response_from_server(char *uri,char *buf){
 	struct stat st;
@@ -64,13 +64,13 @@ void create_response_from_server(char *uri,char *buf){
 	tokens[i] = strtok(uri,delim);
 
 	while(tokens[i] != NULL) {
-		fprintf(stdout,"Tokens[%d] %s\n",i,tokens[i]);
+		//fprintf(stdout,"Tokens[%d] %s\n",i,tokens[i]);
 		i++;
 		tokens[i] = strtok(NULL,delim);
 	}
 
-	fprintf(stdout,"Parshing complete %d \n",i);
-	fprintf(stdout,"Dumping echo/* %s %s %s\n",tokens[i-2],tokens[i-1],__FUNCTION__);
+	//fprintf(stdout,"Parshing complete %d \n",i);
+	//fprintf(stdout,"Dumping echo/* %s %s %s\n",tokens[i-2],tokens[i-1],__FUNCTION__);
 
 	if(i == 2 ){
 		if(strcmp(tokens[i-2],"echo") == 0){
