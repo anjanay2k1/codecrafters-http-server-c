@@ -7,6 +7,8 @@
 #include <errno.h>
 #include <unistd.h>
 
+#define MAX_BYTES 8192
+
 int main() {
 	// Disable output buffering
 	setbuf(stdout, NULL);
@@ -53,8 +55,18 @@ int main() {
 	printf("Waiting for a client to connect...\n");
 	client_addr_len = sizeof(client_addr);
 	//
-	accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
+	int client_conn_fd = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
 	printf("Client connected\n");
+
+	char buf_recv[MAX_BYTES];
+	char buf_send[MAX_BYTES];
+    
+	int success_code = 200;
+	
+
+	sprintf(buf_send,"HTTP/1.1 %d OK\r\n\r\n",success_code);
+	send(client_conn_fd,buf_send,sizeof(buf_send),0);
+
 	//
 	close(server_fd);
 
