@@ -12,7 +12,86 @@
 
 
 #define MAX_LINES 104
+#define GET_URI_PARAMS 10
 #define MAX_BYTES 8192
+
+
+int recv_from_client(int client_conn_fd,char *buf) {
+	
+	int recv_bytes = recv(client_conn_fd,buf,MAX_BYTES,0);
+	if(recv_bytes == -1) {
+		fprintf(stdout,"Error %d %s %s\n",__LINE__,strerror(errno),__FUNCTION__);
+		return 1;
+	}
+	if(recv_bytes == 0) {
+		printf("Connection closed: %s %s\n", strerror(errno),__FUNCTION__);
+	}
+	return 0;
+}
+
+void parse_into_lines(char **lines,int *line, char *buf) {
+
+	char delim[] = "\n";
+	lines[*line] = strtok(buf,delim);
+
+
+	while(lines[*line] != NULL) {
+		printf("Line read %d %s\n",*line,lines[*line]);
+		++*line;
+		lines[*line] = strtok(NULL,delim);
+	}
+}
+
+void create_echo_str(char *str,char *buf) {
+	int len = strlen(str);
+	
+	int success_code = 200;
+	sprintf(buf,"HTTP/1.1 %d OK\r\n\r\n",success_code);
+	sprintf(buf,"%sContent-Type: text/plain\r\n",buf);	 
+	sprintf(buf,"%sContent-Length: %d\r\n",buf,len);
+	sprintf(buf,"%s\r\n",buf);
+	sprintf(buf,"%s %s",buf,str);
+
+	fprintf(stdout,"Final buf: %s\n",buf);
+}
+void create_response_from_server(char *uri,char *buf){
+	struct stat st;
+	
+	char temp_buf[MAX_BYTES];
+	int success_code = 200;
+
+	char delim[] = "/";
+	char *tokens[GET_URI_PARAMS];
+
+	int i = 0;
+	tokens[i] = strtok(uri,delim);
+
+	while(tokens[i] != NULL) {
+		fprintf(stdout,"Tokens[%d] %s\n",i,tokens[i]);
+		i++;
+		tokens[i] = strtok(NULL,delim);
+	}
+
+	fprintf(stdout,"Parshing complete %d \n",i);
+
+	if(i == 2 ){
+		if(strcmp(tokens[i-2],"echo") == 0){
+			create_echo_str(tokens[i-1],buf);
+			fprintf(stdout,"Dumping echo/* %s %s %s\n",tokens[i-2],tokens[i-1],__FUNCTION__);
+			return;
+		}
+		
+	}
+
+	if(stat(tokens[i-1],&st) == -1) {
+		printf("Stat read %s %s\n",strerror(errno),__FUNCTION__);
+		success_code = 404;
+		sprintf(buf,"HTTP/1.1 %d Not Found\r\n\r\n",success_code);
+	} else {
+		sprintf(buf,"HTTP/1.1 %d OK\r\n\r\n",success_code);
+	}
+	printf("buf %s \n",buf);
+}
 
 int main() {
 	// Disable output buffering
@@ -64,41 +143,24 @@ int main() {
 	printf("Client connected\n");
 
 	char buf_recv[MAX_BYTES];
-	int recv_bytes = recv(client_conn_fd,buf_recv,MAX_BYTES,0);
-	if(recv_bytes == 0) {
-		printf("Connection closed: %s %s\n", strerror(errno),__FUNCTION__);
+	if(recv_from_client(client_conn_fd,buf_recv) == 1) {
+		fprintf(stdout,"Exiting error in recv\n");
+		exit(EXIT_FAILURE);
 	}
 	printf("Recv bytes\n %s",buf_recv);
 	printf("\n");
 
 	char* lines[MAX_LINES];
-	int i = 0;
-	char delim[] = "\n";
-	lines[i] = strtok(buf_recv,delim);
-
-
-	while(lines[i] != NULL) {
-		printf("Line read %d %s\n",i,lines[i]);
-		++i;
-		lines[i] = strtok(NULL,delim);
-	}
-
+	int line = 0;
+	parse_into_lines(lines,&line,buf_recv);
+	
 	char method[MAX_BYTES],uri[MAX_BYTES];
 	sscanf(lines[0],"%s %s",method,uri);
 	printf("Method %s Uri %s \n",method,uri);
+	
 
-	struct stat st;
 	char buf_send[MAX_BYTES];
-	int success_code = 200;
-
-	if(stat(uri,&st) == -1) {
-		printf("Stat read %s %s\n",strerror(errno),__FUNCTION__);
-		success_code = 404;
-		sprintf(buf_send,"HTTP/1.1 %d Not Found\r\n\r\n",success_code);
-	} else {
-		sprintf(buf_send,"HTTP/1.1 %d OK\r\n\r\n",success_code);
-	}
-	printf("buf %s \n",buf_send);
+	create_response_from_server(uri,buf_send);
 	send(client_conn_fd,buf_send,sizeof(buf_send),0);
 	close(server_fd);
 
