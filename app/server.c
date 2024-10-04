@@ -10,6 +10,7 @@
 
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <pthread.h>
 
 
 #define MAX_LINES 104
@@ -49,6 +50,7 @@ void create_custome_response(char *str,char *buf) {
 	int success_code = 200;
 	sprintf(buf,"HTTP/1.1 %d OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",success_code,len,str);
 }
+
 
 void create_response_for_endpoint(char *uri,char** lines,int maxlines,char *buf){
 	struct stat st;
@@ -110,24 +112,50 @@ void create_response_for_endpoint(char *uri,char** lines,int maxlines,char *buf)
 
 	}
 
-
-	if(i >= 1 && tokens[i-1] != NULL ) {
-		if(stat(tokens[i-1],&st) == -1) {
+	if(tokens[0] != NULL ) {
+		if(stat(tokens[0],&st) == -1) {
 			printf("Stat read %s %s\n",strerror(errno),__FUNCTION__);
 			success_code = 404;
 			sprintf(buf,"HTTP/1.1 %d Not Found\r\n\r\n",success_code);
 		} else {
 			sprintf(buf,"HTTP/1.1 %d OK\r\n\r\n",success_code);
 		}
-	}
-
-	if(i == 0 && tokens[i] == 0) {
+	} else {
 		//Empty directry 
 		sprintf(buf,"HTTP/1.1 %d OK\r\n\r\n",success_code);
 	} 
 	
 }
 
+void* handle_client_conn(void *args) {
+	
+	int *pclient_conn_fd = (int*)args;
+	int client_conn_fd = *pclient_conn_fd;
+
+	char buf_recv[MAX_BYTES];
+	if(recv_from_client(client_conn_fd,buf_recv) == 1) {
+		printf("Exiting error in recv\n");
+		exit(EXIT_FAILURE);
+	}
+
+	printf("Recv bytes %s\n",buf_recv);
+	printf("\n");
+
+	char* lines[MAX_LINES];
+	int line = 0;
+	parse_into_lines(lines,&line,buf_recv);
+
+	char method[MAX_BYTES],uri[MAX_BYTES];
+	sscanf(lines[0],"%s %s",method,uri);
+	printf("Method %s Uri %s \n",method,uri);
+
+	char buf_send[MAX_BYTES] = {0};
+	create_response_for_endpoint(uri,lines,line,buf_send);
+	send(client_conn_fd,buf_send,MAX_BYTES,0);
+
+	
+	return NULL;
+}
 int main() {
 	// Disable output buffering
 	setbuf(stdout, NULL);
@@ -174,29 +202,16 @@ int main() {
 	printf("Waiting for a client to connect...\n");
 	client_addr_len = sizeof(client_addr);
 	//
-	int client_conn_fd = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
-	printf("Client connected\n");
 
-	char buf_recv[MAX_BYTES];
-	if(recv_from_client(client_conn_fd,buf_recv) == 1) {
-		printf("Exiting error in recv\n");
-		exit(EXIT_FAILURE);
-	}
-	printf("Recv bytes %s\n",buf_recv);
-	printf("\n");
+	while(1) {
 
-	char* lines[MAX_LINES];
-	int line = 0;
-	parse_into_lines(lines,&line,buf_recv);
+		int client_conn_fd = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
+		printf("Client connected\n");
+		pthread_t thread_id;
+		pthread_create(&thread_id,NULL,handle_client_conn,(void*)&client_conn_fd);
 
-	char method[MAX_BYTES],uri[MAX_BYTES];
-	sscanf(lines[0],"%s %s",method,uri);
-	printf("Method %s Uri %s \n",method,uri);
-
-
-	char buf_send[MAX_BYTES] = {0};
-	create_response_for_endpoint(uri,lines,line,buf_send);
-	send(client_conn_fd,buf_send,MAX_BYTES,0);
+	}	
+	
 	close(server_fd);
 
 	return 0;
