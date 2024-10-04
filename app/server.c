@@ -67,33 +67,26 @@ void create_response_for_endpoint(char *uri,char** lines,int maxlines,char *buf)
 		tokens[i] = strtok(NULL,delim);
 	}
 
-	if(i == 2 ){
-		if(strcmp(tokens[i-2],"echo") == 0){
-			create_custome_response(tokens[i-1],buf);
-			return;
-		}
+	if(i == 2 && strcmp(tokens[i-2],"echo") == 0 ) {
+		create_custome_response(tokens[i-1],buf);
+		return;
 	}
-
-	if(strcasecmp(tokens[i-1],"User-agent") == 0) {	
-		
-		printf("User-agent searched \n");
+    
+	if(i >= 1 && strcasecmp(tokens[i-1],"User-agent") == 0) {	
+		printf("User-agent searched\n");
 		for(int i = 1 ; i < maxlines; i++) {
 		
 			if(strcasestr(lines[i],"User-agent") != NULL) {
 		
-				printf("User-agent found \n");
-				char dup_str[MAX_BYTES] = {0};
+				printf("User-agent found\n");
+				char dup_str[MAX_BYTES];
 				strcpy(dup_str,lines[i]);
-				printf("User agent string %s\n",dup_str);
-
 				char *user_agent_val = strtok(dup_str,":");
-				printf("User-agent after first parshing %s\n",user_agent_val);
 		
 				if(user_agent_val != NULL) {
-		
-					user_agent_val = strtok(NULL,":");
-					printf("User-agent after sec parshing %s\n",user_agent_val);
 					
+					user_agent_val = strtok(NULL,":");
+					printf("User-agent string found %s\n",user_agent_val);
 					char newstr[MAX_BYTES] = {'\0'};
 					int j = 0;
 					while(*user_agent_val != '\r') {
@@ -108,8 +101,7 @@ void create_response_for_endpoint(char *uri,char** lines,int maxlines,char *buf)
 						j++;
 					}
 					create_custome_response(newstr,buf);
-					printf("Create custom response user %s buf %s\n",newstr,buf);
-					
+					printf("buf populated %s with user-agent %s\n",buf,user_agent_val);
 	                return;				
 				}
 			}
@@ -119,13 +111,21 @@ void create_response_for_endpoint(char *uri,char** lines,int maxlines,char *buf)
 	}
 
 
-	if(stat(tokens[i-1],&st) == -1) {
-		printf("Stat read %s %s\n",strerror(errno),__FUNCTION__);
-		success_code = 404;
-		sprintf(buf,"HTTP/1.1 %d Not Found\r\n\r\n",success_code);
-	} else {
-		sprintf(buf,"HTTP/1.1 %d OK\r\n\r\n",success_code);
+	if(i >= 1 && tokens[i-1] != NULL ) {
+		if(stat(tokens[i-1],&st) == -1) {
+			printf("Stat read %s %s\n",strerror(errno),__FUNCTION__);
+			success_code = 404;
+			sprintf(buf,"HTTP/1.1 %d Not Found\r\n\r\n",success_code);
+		} else {
+			sprintf(buf,"HTTP/1.1 %d OK\r\n\r\n",success_code);
+		}
 	}
+
+	if(i == 0 && tokens[i] == 0) {
+		//Empty directry 
+		sprintf(buf,"HTTP/1.1 %d OK\r\n\r\n",success_code);
+	} 
+	
 }
 
 int main() {
@@ -196,7 +196,7 @@ int main() {
 
 	char buf_send[MAX_BYTES] = {0};
 	create_response_for_endpoint(uri,lines,line,buf_send);
-	
+	send(client_conn_fd,buf_send,MAX_BYTES,0);
 	close(server_fd);
 
 	return 0;
