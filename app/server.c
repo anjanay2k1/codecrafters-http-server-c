@@ -36,7 +36,7 @@ int recv_from_client(int client_conn_fd,char *buf) {
 	return 0;
 }
 
-void parse_into_lines(char **lines,int *line, char *buf) {
+void parse_req_into_lines(char **lines,int *line, char *buf) {
 
 	char delim[] = "\n";
 	lines[*line] = strtok(buf,delim);
@@ -133,7 +133,68 @@ void handle_file_request(char *file, char *buf) {
 	printf("Final buf %s\n",buf);
 }
 
-void create_response_for_endpoint(char *uri,char** lines,int maxlines,char *buf){
+void handle_file_post_request(char* file,char **lines,int maxlines,char *buf) {
+
+	int output_fd;
+	int success_code = 201;
+	
+
+	int content_len = -1;
+
+	for(int i = 1 ; i < maxlines; i++) {
+		if(strcasestr(lines[i],"Content-Length") != NULL) {
+			printf("Content-Length header found\n");
+			char dup_str[MAX_BYTES];
+			strcpy(dup_str,lines[i]);
+			printf("Conten-Length string %s \n",dup_str);
+			char *content_ln = strtok(dup_str,":");
+		
+			if(content_ln != NULL) {					
+				content_ln = strtok(NULL,":");
+				printf("Content-Length string %s\n",content_ln);
+				char newstr[MAX_BYTES] = {'\0'};
+				remove_crlf_from_end(content_ln,newstr);
+				content_len = atoi(newstr);
+				printf("Processed Content-Lenth string %s Length %d \n",newstr,content_len);
+				
+			}
+		}
+	}
+
+	int i = 0;
+	for(i = 1 ; i < maxlines; i++) {
+		if(strcasestr(lines[i],"\r") == NULL) {
+			break;
+		}
+	}
+    
+	//next line is body
+	if ( i > maxlines) {
+		printf("I values exceeds %d\n",i);
+		exit(EXIT_FAILURE);
+	}
+
+	if(content_len == -1) {
+		printf("No content len field \n");
+		exit(EXIT_FAILURE);
+	}
+    
+	printf("Here is Response body %s \n",lines[i]);
+	printf("File to create %s\n",file);
+
+	char new_buf_for_write[8192];
+	sprintf(new_buf_for_write,"%s",lines[i]);
+
+	output_fd = open(file,O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+	if(output_fd == -1 ){
+		printf("File open failed %s %s\n",strerror(errno),__FUNCTION__);
+	}
+
+	sprintf(buf,"HTTP/1.1 %d Created\r\n\r\n",success_code);
+	write(output_fd,new_buf_for_write,content_len);
+
+}
+void get_response_for_endpoint(char *uri,char** lines,int maxlines,char *buf){
 	struct stat st;
 
 	char temp_buf[MAX_BYTES];
@@ -179,11 +240,34 @@ void create_response_for_endpoint(char *uri,char** lines,int maxlines,char *buf)
 	} 
 	if(i == 0 && tokens[0] == NULL){
 		//Empty directry 
+		printf("Empty directory\n");
 		sprintf(buf,"HTTP/1.1 %d OK\r\n\r\n",success_code);
 	} 
 	
 }
 
+void post_response_for_endpoint(char* uri,char **lines,int maxlines,char *buf) {
+	
+	char temp_buf[MAX_BYTES];
+	int success_code = 200;
+
+	char delim[] = "/";
+	char *tokens[GET_URI_PARAMS];
+
+	int i = 0;
+	tokens[i] = strtok(uri,delim);
+
+	while(tokens[i] != NULL) {
+		i++;
+		tokens[i] = strtok(NULL,delim);
+	}
+
+	if(i >= 2 && strcmp(tokens[i-2],"files") == 0) {
+		printf("Create file with the content from post request %s\n",__FUNCTION__);
+		handle_file_post_request(tokens[i-1],lines,maxlines,buf);
+		return;
+	}
+}
 void* handle_client_conn(void *args) {
 	
 	int *pclient_conn_fd = (int*)args;
@@ -200,17 +284,26 @@ void* handle_client_conn(void *args) {
 
 	char* lines[MAX_LINES];
 	int line = 0;
-	parse_into_lines(lines,&line,buf_recv);
+	parse_req_into_lines(lines,&line,buf_recv);
 
 	char method[MAX_BYTES],uri[MAX_BYTES];
 	sscanf(lines[0],"%s %s",method,uri);
 	printf("Method %s Uri %s \n",method,uri);
 
 	char buf_send[MAX_BYTES] = {0};
-	create_response_for_endpoint(uri,lines,line,buf_send);
-	send(client_conn_fd,buf_send,MAX_BYTES,0);
+	if(strcasecmp(method,"GET") == 0) {
+		printf("Get rquest received\n");
+		get_response_for_endpoint(uri,lines,line,buf_send);
 
-	
+	} else if(strcasecmp(method,"POST") == 0) {
+		printf("Post rquest received\n");
+		post_response_for_endpoint(uri,lines,line,buf_send);
+
+	} else {
+		printf("Not supported yet\n");
+	}
+
+	send(client_conn_fd,buf_send,MAX_BYTES,0);	
 	return NULL;
 }
 int main(int argc, char *argv[] ) {
