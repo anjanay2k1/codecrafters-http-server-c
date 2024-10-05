@@ -10,6 +10,7 @@
 
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <getopt.h>
 #include <pthread.h>
 
 
@@ -17,6 +18,10 @@
 #define GET_URI_PARAMS 10
 #define MAX_BYTES 8192
  
+static struct option long_options[] = {
+    {"directory", required_argument, NULL, 'd'},
+    {NULL, 0, NULL, 0}
+};
 
 int recv_from_client(int client_conn_fd,char *buf) {
 
@@ -51,6 +56,82 @@ void create_custome_response(char *str,char *buf) {
 	sprintf(buf,"HTTP/1.1 %d OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",success_code,len,str);
 }
 
+void remove_crlf_from_end(char *src,char *dst ) {
+	
+	while(*src != '\r') {
+		if(isspace(*src)){
+			++src;
+			continue;
+		}
+		*dst = *src;
+		dst++;
+		src++;
+	}
+}
+
+void handle_user_agent_query(char** lines,int maxlines,char* buf) {
+	for(int i = 1 ; i < maxlines; i++) {
+		if(strcasestr(lines[i],"User-agent") != NULL) {
+			printf("User-agent found\n");
+			char dup_str[MAX_BYTES];
+			strcpy(dup_str,lines[i]);
+			char *user_agent_val = strtok(dup_str,":");
+		
+			if(user_agent_val != NULL) {					
+				user_agent_val = strtok(NULL,":");
+				printf("User-agent string found %s\n",user_agent_val);
+				char newstr[MAX_BYTES] = {'\0'};
+				remove_crlf_from_end(user_agent_val,newstr);
+				create_custome_response(newstr,buf);
+				printf("Buffer populated %s with user-agent %s\n",buf,user_agent_val);			
+			}
+		}
+	}
+}
+
+void handle_file_request(char *file, char *buf) {
+	struct stat st;
+	int success_code = 404;
+	int input_fd;
+
+	if(stat(file,&st) == -1) {
+		sprintf(buf,"HTTP/1.1 %d Not Found\r\n\r\n",success_code);
+	} else {
+		success_code = 200;	
+		
+		int bytes_written = sprintf(buf,"HTTP/1.1 %d OK\r\nContent-Type: application/octet-stream\r\n",success_code);
+		input_fd = open(file, O_RDONLY);
+		int sz = lseek(input_fd,0L,SEEK_END);
+		lseek(input_fd,0L,SEEK_SET);
+	
+		
+		int old = bytes_written;
+		bytes_written = sprintf(buf+old,"Content-Length: %d\r\n\r\n",sz);
+		
+		
+		old = old + bytes_written;
+		char buf_read[1024] = {0};
+		int read_bytes =  read(input_fd,buf_read,1024);
+		if(read_bytes == -1) {
+			printf("Error in reading %s \n",strerror(errno));
+			exit(EXIT_FAILURE);
+		}
+		while(read_bytes != 0) {
+			if(read_bytes == -1) {
+				printf("Error in reading %s \n",strerror(errno));
+				exit(EXIT_FAILURE);
+			}
+
+			bytes_written = sprintf(buf+old,"%s",buf_read);
+			old = old +bytes_written;
+			read_bytes =  read(input_fd,buf_read,1024);
+			if(read_bytes == -1) {
+				printf("Error in reading %s \n",strerror(errno));
+			}
+		}
+	}
+	printf("Final buf %s\n",buf);
+}
 
 void create_response_for_endpoint(char *uri,char** lines,int maxlines,char *buf){
 	struct stat st;
@@ -76,40 +157,15 @@ void create_response_for_endpoint(char *uri,char** lines,int maxlines,char *buf)
     
 	if(i >= 1 && strcasecmp(tokens[i-1],"User-agent") == 0) {	
 		printf("User-agent searched\n");
-		for(int i = 1 ; i < maxlines; i++) {
-		
-			if(strcasestr(lines[i],"User-agent") != NULL) {
-		
-				printf("User-agent found\n");
-				char dup_str[MAX_BYTES];
-				strcpy(dup_str,lines[i]);
-				char *user_agent_val = strtok(dup_str,":");
-		
-				if(user_agent_val != NULL) {
-					
-					user_agent_val = strtok(NULL,":");
-					printf("User-agent string found %s\n",user_agent_val);
-					char newstr[MAX_BYTES] = {'\0'};
-					int j = 0;
-					while(*user_agent_val != '\r') {
-		
-						if(isspace(*user_agent_val)){
-							++user_agent_val;
-							continue;
-						}
-		
-						newstr[j] = *user_agent_val;
-						user_agent_val++;
-						j++;
-					}
-					create_custome_response(newstr,buf);
-					printf("buf populated %s with user-agent %s\n",buf,user_agent_val);
-	                return;				
-				}
-			}
+		handle_user_agent_query(lines,maxlines,buf);
+		return;
+	
+	}
 
-		}
-
+	if(i == 2 && strcmp(tokens[i-2],"files") == 0) {
+		printf("Query for files\n");
+		handle_file_request(tokens[i-1],buf);
+		return;
 	}
 
 	if(tokens[0] != NULL ) {
@@ -120,7 +176,8 @@ void create_response_for_endpoint(char *uri,char** lines,int maxlines,char *buf)
 		} else {
 			sprintf(buf,"HTTP/1.1 %d OK\r\n\r\n",success_code);
 		}
-	} else {
+	} 
+	if(i == 0 && tokens[0] == NULL){
 		//Empty directry 
 		sprintf(buf,"HTTP/1.1 %d OK\r\n\r\n",success_code);
 	} 
@@ -156,7 +213,7 @@ void* handle_client_conn(void *args) {
 	
 	return NULL;
 }
-int main() {
+int main(int argc, char *argv[] ) {
 	// Disable output buffering
 	setbuf(stdout, NULL);
  	setbuf(stderr, NULL);
@@ -168,6 +225,25 @@ int main() {
 	//
 	int server_fd, client_addr_len;
 	struct sockaddr_in client_addr;
+	int client_conn_fd;
+	int ch;
+	char *diret_name = NULL;
+
+	while ((ch = getopt_long(argc, argv, "d:", long_options, NULL)) != -1){
+	switch (ch){
+        case 'd':
+            diret_name = optarg; 
+        break;
+    	}
+    }
+
+	if(diret_name != NULL) {
+		printf("Directory change is requested\n");
+		if(chdir(diret_name) != 0) {
+			printf("Dirctory change not happened %s\n",strerror(errno));
+			return 1;
+		}
+	}
 	//
 	server_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_fd == -1) {
@@ -205,11 +281,10 @@ int main() {
 
 	while(1) {
 
-		int client_conn_fd = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
+		client_conn_fd = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
 		printf("Client connected\n");
 		pthread_t thread_id;
 		pthread_create(&thread_id,NULL,handle_client_conn,(void*)&client_conn_fd);
-
 	}	
 	
 	close(server_fd);
