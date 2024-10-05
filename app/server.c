@@ -18,22 +18,39 @@
 #define GET_URI_PARAMS 10
 #define MAX_BYTES 8192
  
+static char* server_compression_otion[] = {
+		"gzip"
+};
+
 static struct option long_options[] = {
     {"directory", required_argument, NULL, 'd'},
     {NULL, 0, NULL, 0}
 };
 
-int recv_from_client(int client_conn_fd,char *buf) {
+void remove_crlf_from_end(char *src,char *dst ) {
+	
+	while(*src != '\r') {
+		if(isspace(*src)){
+			++src;
+			continue;
+		}
+		*dst = *src;
+		dst++;
+		src++;
+	}
+}
 
-	int recv_bytes = recv(client_conn_fd,buf,MAX_BYTES,0);
-	if(recv_bytes == -1) {
-		fprintf(stdout,"Error %d %s %s\n",__LINE__,strerror(errno),__FUNCTION__);
-		return 1;
+int search_in_server_supportd_compresion(char *str_to_find) {
+	int ret = 1;
+	int max_option = sizeof(server_compression_otion)/sizeof(server_compression_otion[0]);
+	for(int i = 0 ; i < max_option ; i++) {
+		if(strcasecmp(server_compression_otion[i],str_to_find) == 0) {
+			printf("Server compression option found %s searched %s %s \n",server_compression_otion[i],
+							str_to_find,__FUNCTION__);
+			ret = 0;
+		}
 	}
-	if(recv_bytes == 0) {
-		printf("Connection closed: %s %s\n", strerror(errno),__FUNCTION__);
-	}
-	return 0;
+	return ret;
 }
 
 void parse_req_into_lines(char **lines,int *line, char *buf) {
@@ -49,6 +66,42 @@ void parse_req_into_lines(char **lines,int *line, char *buf) {
 	}
 }
 
+int recv_from_client(int client_conn_fd,char *buf) {
+
+	int recv_bytes = recv(client_conn_fd,buf,MAX_BYTES,0);
+	if(recv_bytes == -1) {
+		fprintf(stdout,"Error %d %s %s\n",__LINE__,strerror(errno),__FUNCTION__);
+		return 1;
+	}
+	if(recv_bytes == 0) {
+		printf("Connection closed: %s %s\n", strerror(errno),__FUNCTION__);
+	}
+	return 0;
+}
+
+int find_string_in_parsed_header(char* str_to_find,char **lines,int maxline,char *found) {
+	
+	int ret = 1;
+	for(int i = 1 ; i < maxline; i++) {
+		if(strcasestr(lines[i], str_to_find) != NULL) {
+			printf("String found %s %s\n",str_to_find,__FUNCTION__);
+			char dup_str[MAX_BYTES];
+			strcpy(dup_str,lines[i]);
+			char *str_to_find_val = strtok(dup_str,":");
+		
+			if(str_to_find_val != NULL) {					
+				str_to_find_val = strtok(NULL,":");
+				printf("The value of searched string %s\n",str_to_find_val);
+				
+				remove_crlf_from_end(str_to_find_val,found);
+				ret = 0;
+							
+			}
+		}
+	}
+
+	return ret;
+}
 void create_custome_response(char *str,char *buf) {
 	int len = strlen(str);
 
@@ -56,36 +109,11 @@ void create_custome_response(char *str,char *buf) {
 	sprintf(buf,"HTTP/1.1 %d OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",success_code,len,str);
 }
 
-void remove_crlf_from_end(char *src,char *dst ) {
-	
-	while(*src != '\r') {
-		if(isspace(*src)){
-			++src;
-			continue;
-		}
-		*dst = *src;
-		dst++;
-		src++;
-	}
-}
-
 void handle_user_agent_query(char** lines,int maxlines,char* buf) {
-	for(int i = 1 ; i < maxlines; i++) {
-		if(strcasestr(lines[i],"User-agent") != NULL) {
-			printf("User-agent found\n");
-			char dup_str[MAX_BYTES];
-			strcpy(dup_str,lines[i]);
-			char *user_agent_val = strtok(dup_str,":");
-		
-			if(user_agent_val != NULL) {					
-				user_agent_val = strtok(NULL,":");
-				printf("User-agent string found %s\n",user_agent_val);
-				char newstr[MAX_BYTES] = {'\0'};
-				remove_crlf_from_end(user_agent_val,newstr);
-				create_custome_response(newstr,buf);
-				printf("Buffer populated %s with user-agent %s\n",buf,user_agent_val);			
-			}
-		}
+	
+	char newstr[MAX_BYTES] = {'\0'};
+	if( find_string_in_parsed_header("User-agent",lines,maxlines,newstr) == 0 ){
+		create_custome_response(newstr,buf);
 	}
 }
 
@@ -140,27 +168,13 @@ void handle_file_post_request(char* file,char **lines,int maxlines,char *buf) {
 	
 
 	int content_len = -1;
+	char newstr[MAX_BYTES] = {'\0'};
 
-	for(int i = 1 ; i < maxlines; i++) {
-		if(strcasestr(lines[i],"Content-Length") != NULL) {
-			printf("Content-Length header found\n");
-			char dup_str[MAX_BYTES];
-			strcpy(dup_str,lines[i]);
-			printf("Conten-Length string %s \n",dup_str);
-			char *content_ln = strtok(dup_str,":");
-		
-			if(content_ln != NULL) {					
-				content_ln = strtok(NULL,":");
-				printf("Content-Length string %s\n",content_ln);
-				char newstr[MAX_BYTES] = {'\0'};
-				remove_crlf_from_end(content_ln,newstr);
-				content_len = atoi(newstr);
-				printf("Processed Content-Lenth string %s Length %d \n",newstr,content_len);
-				
-			}
-		}
+	if(find_string_in_parsed_header("Content-Length",lines,maxlines,newstr) == 0) {
+		content_len = atoi(newstr);
 	}
 
+	
 	int i = 0;
 	for(i = 1 ; i < maxlines; i++) {
 		if(strcasestr(lines[i],"\r") == NULL) {
@@ -212,9 +226,35 @@ void get_response_for_endpoint(char *uri,char** lines,int maxlines,char *buf){
 	}
 
 	if(i == 2 && strcmp(tokens[i-2],"echo") == 0 ) {
-		create_custome_response(tokens[i-1],buf);
+		printf("Echo request recieved :%s\n",__FUNCTION__);
+		char accept_encoding[MAX_BYTES] = {0};
+		int prev_index = 0;
+		int bytes_written = sprintf(buf+prev_index,"HTTP/1.1 %d OK\r\n",success_code);
+		prev_index += bytes_written;
+		bytes_written = sprintf(buf+prev_index,"Content-Type: text/plain\r\n");
+		int len = strlen(tokens[i-1]);
+		prev_index += bytes_written;
+		bytes_written = sprintf(buf+prev_index,"Content-Length: %d\r\n",len);
+
+		if(find_string_in_parsed_header("Accept-Encoding",lines,maxlines,accept_encoding) == 0) {
+
+			if(search_in_server_supportd_compresion(accept_encoding) == 0 ) {
+				
+				prev_index += bytes_written;
+				bytes_written = sprintf(buf+prev_index,"Content-Encoding: gzip\r\n");
+				
+				
+			}
+		}
+		prev_index += bytes_written;
+		bytes_written = sprintf(buf+prev_index,"\r\n");
+		prev_index += bytes_written;
+		bytes_written = sprintf(buf+prev_index,"%s",tokens[i-1]);
+		printf("Final buf %s \nbytes_written %d %s\n",buf,bytes_written,__FUNCTION__);
 		return;
 	}
+
+	
     
 	if(i >= 1 && strcasecmp(tokens[i-1],"User-agent") == 0) {	
 		printf("User-agent searched\n");
@@ -263,7 +303,7 @@ void post_response_for_endpoint(char* uri,char **lines,int maxlines,char *buf) {
 	}
 
 	if(i >= 2 && strcmp(tokens[i-2],"files") == 0) {
-		printf("Create file with the content from post request %s\n",__FUNCTION__);
+		printf("Create file with the content from post request :->%s\n",__FUNCTION__);
 		handle_file_post_request(tokens[i-1],lines,maxlines,buf);
 		return;
 	}
