@@ -14,7 +14,7 @@
 #include <pthread.h>
 
 
-#define MAX_LINES 104
+#define MAX_LINES 101
 #define GET_URI_PARAMS 10
 #define MAX_BYTES 8192
  
@@ -28,7 +28,6 @@ static struct option long_options[] = {
 };
 
 void remove_crlf_from_end(char *src,char *dst ) {
-	
 	while(*src != '\r') {
 		if(isspace(*src)){
 			++src;
@@ -79,28 +78,41 @@ int recv_from_client(int client_conn_fd,char *buf) {
 	return 0;
 }
 
-int find_string_in_parsed_header(char* str_to_find,char **lines,int maxline,char *found) {
+int find_string_in_parsed_header(char* str_to_find,char **lines,int maxline,char *found,char** p_found) {
 	
-	int ret = 1;
 	for(int i = 1 ; i < maxline; i++) {
 		if(strcasestr(lines[i], str_to_find) != NULL) {
-			printf("String found %s %s\n",str_to_find,__FUNCTION__);
+			printf("Search string found %s \n",str_to_find);
 			char dup_str[MAX_BYTES];
 			strcpy(dup_str,lines[i]);
 			char *str_to_find_val = strtok(dup_str,":");
 		
 			if(str_to_find_val != NULL) {					
 				str_to_find_val = strtok(NULL,":");
-				printf("The value of searched string %s\n",str_to_find_val);
+				printf("Search string value %s\n",str_to_find_val);
+				//Here the value can be comma seperate list also .need to further parse this 
 				
-				remove_crlf_from_end(str_to_find_val,found);
-				ret = 0;
-							
+				int j = 0;
+				p_found[j] = strtok(str_to_find_val,",");
+				while(p_found[j] != NULL) {
+					printf("P_found[%d]  %s\n",j,p_found[j]);
+					j++;
+					p_found[j] = strtok(NULL,",");
+
+					if(p_found[j] == NULL && j == 1) {
+						printf("No Comma sep values \n");
+						remove_crlf_from_end(str_to_find_val,found);
+						p_found[0] = NULL;
+						return 0;
+					}
+
+				}
+				return 0;			
 			}
 		}
 	}
 
-	return ret;
+	return 1;
 }
 void create_custome_response(char *str,char *buf) {
 	int len = strlen(str);
@@ -112,7 +124,8 @@ void create_custome_response(char *str,char *buf) {
 void handle_user_agent_query(char** lines,int maxlines,char* buf) {
 	
 	char newstr[MAX_BYTES] = {'\0'};
-	if( find_string_in_parsed_header("User-agent",lines,maxlines,newstr) == 0 ){
+	char* comma_sep_vals[10];
+	if( find_string_in_parsed_header("User-agent",lines,maxlines,newstr,comma_sep_vals) == 0 ){
 		create_custome_response(newstr,buf);
 	}
 }
@@ -169,8 +182,8 @@ void handle_file_post_request(char* file,char **lines,int maxlines,char *buf) {
 
 	int content_len = -1;
 	char newstr[MAX_BYTES] = {'\0'};
-
-	if(find_string_in_parsed_header("Content-Length",lines,maxlines,newstr) == 0) {
+	char* comma_sep_vals[10];
+	if(find_string_in_parsed_header("Content-Length",lines,maxlines,newstr,comma_sep_vals) == 0) {
 		content_len = atoi(newstr);
 	}
 
@@ -226,7 +239,7 @@ void get_response_for_endpoint(char *uri,char** lines,int maxlines,char *buf){
 	}
 
 	if(i == 2 && strcmp(tokens[i-2],"echo") == 0 ) {
-		printf("Echo request recieved :%s\n",__FUNCTION__);
+		printf("Echo request recieved \n");
 		char accept_encoding[MAX_BYTES] = {0};
 		int prev_index = 0;
 		int bytes_written = sprintf(buf+prev_index,"HTTP/1.1 %d OK\r\n",success_code);
@@ -236,14 +249,31 @@ void get_response_for_endpoint(char *uri,char** lines,int maxlines,char *buf){
 		prev_index += bytes_written;
 		bytes_written = sprintf(buf+prev_index,"Content-Length: %d\r\n",len);
 
-		if(find_string_in_parsed_header("Accept-Encoding",lines,maxlines,accept_encoding) == 0) {
-
-			if(search_in_server_supportd_compresion(accept_encoding) == 0 ) {
+		char* comma_sep_vals[10] = {NULL};
+		if(find_string_in_parsed_header("Accept-Encoding",lines,maxlines,accept_encoding,comma_sep_vals) == 0) {
+			if(comma_sep_vals[0] == NULL) {
+				printf("Serach in single value\n");
+				if(search_in_server_supportd_compresion(accept_encoding) == 0 ) {
 				
-				prev_index += bytes_written;
-				bytes_written = sprintf(buf+prev_index,"Content-Encoding: gzip\r\n");
+					prev_index += bytes_written;
+					bytes_written = sprintf(buf+prev_index,"Content-Encoding: gzip\r\n");
+					printf("Found single matching\n");
+					
+				}
+			} else {
+				printf("Serach in comma seperated list values\n");
+				for(int j = 0 ; j < 10 && comma_sep_vals[j] != NULL ; j++) {
+					char temp_to_compare[8192];	
+					remove_crlf_from_end(comma_sep_vals[j],temp_to_compare);
+					printf("String to search %s %s \n",temp_to_compare,comma_sep_vals[j]);
+					if(search_in_server_supportd_compresion(temp_to_compare) == 0 ) {
 				
-				
+						prev_index += bytes_written;
+						bytes_written = sprintf(buf+prev_index,"Content-Encoding: gzip\r\n");
+						printf("Found breaking\n");
+						break;
+					}
+				}
 			}
 		}
 		prev_index += bytes_written;
@@ -308,6 +338,7 @@ void post_response_for_endpoint(char* uri,char **lines,int maxlines,char *buf) {
 		return;
 	}
 }
+
 void* handle_client_conn(void *args) {
 	
 	int *pclient_conn_fd = (int*)args;
@@ -346,6 +377,7 @@ void* handle_client_conn(void *args) {
 	send(client_conn_fd,buf_send,MAX_BYTES,0);	
 	return NULL;
 }
+
 int main(int argc, char *argv[] ) {
 	// Disable output buffering
 	setbuf(stdout, NULL);
