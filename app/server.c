@@ -11,23 +11,26 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <getopt.h>
+#include <zlib.h>
 #include <pthread.h>
 
 
 #define MAX_LINES 101
 #define GET_URI_PARAMS 10
 #define MAX_BYTES 8192
- 
-static char* server_compression_otion[] = {
-		"gzip"
-};
+#define MAX_COMPRESSION_OPTIONS 10
+
 
 static struct option long_options[] = {
     {"directory", required_argument, NULL, 'd'},
     {NULL, 0, NULL, 0}
 };
 
-void remove_crlf_from_end(char *src,char *dst ) {
+static char* server_compression_otion[] = {
+	"gzip"
+};
+
+static void remove_crlf_from_end(char *src,char *dst ) {
 	while(*src != '\r') {
 		if(isspace(*src)){
 			++src;
@@ -38,14 +41,32 @@ void remove_crlf_from_end(char *src,char *dst ) {
 		src++;
 	}
 }
+void gzip_compression(char *src,char *dst,int *dst_len) {
+	
+	z_stream defstream;
+    defstream.zalloc = Z_NULL;
+    defstream.zfree = Z_NULL;
+    defstream.opaque = Z_NULL;
 
+	defstream.avail_in = strlen(src); 
+    defstream.next_in = (Bytef *)src; 
+    defstream.avail_out = 8192; // size of output
+    defstream.next_out = (Bytef *)dst; // output char array
+	
+	deflateInit2(&defstream, Z_BEST_COMPRESSION,Z_DEFLATED, 15 | 16, 8, Z_DEFAULT_STRATEGY);
+    deflate(&defstream, Z_FINISH);
+    deflateEnd(&defstream);
+	*dst_len = defstream.total_out;
+	printf("Compressed byte len %lu\n",defstream.total_out);
+
+}
 int search_in_server_supportd_compresion(char *str_to_find) {
 	int ret = 1;
 	int max_option = sizeof(server_compression_otion)/sizeof(server_compression_otion[0]);
 	for(int i = 0 ; i < max_option ; i++) {
 		if(strcasecmp(server_compression_otion[i],str_to_find) == 0) {
-			printf("Server compression option found %s searched %s %s \n",server_compression_otion[i],
-							str_to_find,__FUNCTION__);
+			printf("Server compression option found %s searched %s\n",server_compression_otion[i],
+							str_to_find);
 			ret = 0;
 		}
 	}
@@ -79,9 +100,9 @@ int recv_from_client(int client_conn_fd,char *buf) {
 }
 
 int find_string_in_parsed_header(char* str_to_find,char **lines,int maxline,char *found,char** p_found) {
-	
 	for(int i = 1 ; i < maxline; i++) {
 		if(strcasestr(lines[i], str_to_find) != NULL) {
+			
 			printf("Search string found %s \n",str_to_find);
 			char dup_str[MAX_BYTES];
 			strcpy(dup_str,lines[i]);
@@ -90,22 +111,21 @@ int find_string_in_parsed_header(char* str_to_find,char **lines,int maxline,char
 			if(str_to_find_val != NULL) {					
 				str_to_find_val = strtok(NULL,":");
 				printf("Search string value %s\n",str_to_find_val);
-				//Here the value can be comma seperate list also .need to further parse this 
 				
+				//Here the value can be comma seperate list also .need to further parse this 
 				int j = 0;
 				p_found[j] = strtok(str_to_find_val,",");
 				while(p_found[j] != NULL) {
-					printf("P_found[%d]  %s\n",j,p_found[j]);
+					printf("Comm seperated values[%d] %s\n",j,p_found[j]);
 					j++;
 					p_found[j] = strtok(NULL,",");
 
 					if(p_found[j] == NULL && j == 1) {
-						printf("No Comma sep values \n");
+						printf("Only single value is given for the searched string\n");
 						remove_crlf_from_end(str_to_find_val,found);
 						p_found[0] = NULL;
 						return 0;
 					}
-
 				}
 				return 0;			
 			}
@@ -114,66 +134,58 @@ int find_string_in_parsed_header(char* str_to_find,char **lines,int maxline,char
 
 	return 1;
 }
-void create_custome_response(char *str,char *buf) {
-	int len = strlen(str);
 
-	int success_code = 200;
-	sprintf(buf,"HTTP/1.1 %d OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",success_code,len,str);
-}
-
-void handle_user_agent_query(char** lines,int maxlines,char* buf) {
+int handle_user_agent_query(char** lines,int maxlines,char* found) {
 	
-	char newstr[MAX_BYTES] = {'\0'};
-	char* comma_sep_vals[10];
-	if( find_string_in_parsed_header("User-agent",lines,maxlines,newstr,comma_sep_vals) == 0 ){
-		create_custome_response(newstr,buf);
-	}
-}
+	char  user_agent_single_val[MAX_BYTES] = {'\0'};
+	char* user_agent_multiple_val[MAX_COMPRESSION_OPTIONS] = {0};
 
-void handle_file_request(char *file, char *buf) {
+	if( find_string_in_parsed_header("User-agent",lines,maxlines,user_agent_single_val,user_agent_multiple_val) == 0 ){
+		//Here in all case this parameter will return single value
+		printf("User-agent value %s\n",user_agent_single_val);
+		memcpy(found,user_agent_single_val,strlen(user_agent_single_val));
+		return 1;
+	}
+	return 0;
+}
+	
+int handle_file_get_content_request(char *file, char *buf,int *len) {
 	struct stat st;
-	int success_code = 404;
 	int input_fd;
 
 	if(stat(file,&st) == -1) {
-		sprintf(buf,"HTTP/1.1 %d Not Found\r\n\r\n",success_code);
+		return 1;
+
 	} else {
-		success_code = 200;	
 		
-		int bytes_written = sprintf(buf,"HTTP/1.1 %d OK\r\nContent-Type: application/octet-stream\r\n",success_code);
 		input_fd = open(file, O_RDONLY);
 		int sz = lseek(input_fd,0L,SEEK_END);
 		lseek(input_fd,0L,SEEK_SET);
-	
-		
-		int old = bytes_written;
-		bytes_written = sprintf(buf+old,"Content-Length: %d\r\n\r\n",sz);
-		
-		
-		old = old + bytes_written;
+		*len = sz;
 		char buf_read[1024] = {0};
+		int prev_read = 0;
 		int read_bytes =  read(input_fd,buf_read,1024);
 		if(read_bytes == -1) {
 			printf("Error in reading %s \n",strerror(errno));
-			exit(EXIT_FAILURE);
+			return 1;
 		}
-		while(read_bytes != 0) {
-			if(read_bytes == -1) {
-				printf("Error in reading %s \n",strerror(errno));
-				exit(EXIT_FAILURE);
-			}
+		memcpy(buf+prev_read,buf_read,read_bytes);
+		prev_read += read_bytes;
 
-			bytes_written = sprintf(buf+old,"%s",buf_read);
-			old = old +bytes_written;
+		while(read_bytes != 0) {
+			
 			read_bytes =  read(input_fd,buf_read,1024);
 			if(read_bytes == -1) {
 				printf("Error in reading %s \n",strerror(errno));
+				return 1;
 			}
+			memcpy(buf+prev_read,buf_read,read_bytes);
 		}
-	}
-	printf("Final buf %s\n",buf);
-}
 
+		return 0;
+	}
+	return 1;
+}
 void handle_file_post_request(char* file,char **lines,int maxlines,char *buf) {
 
 	int output_fd;
@@ -221,7 +233,35 @@ void handle_file_post_request(char* file,char **lines,int maxlines,char *buf) {
 	write(output_fd,new_buf_for_write,content_len);
 
 }
-void get_response_for_endpoint(char *uri,char** lines,int maxlines,char *buf){
+int parse_accept_encoding_header(char **lines,int maxlines,char *found) {
+	char accept_encoding_singe_val[MAX_BYTES] = {0};
+	char* accept_encoding_multiple_val[MAX_COMPRESSION_OPTIONS] ={0}; 
+	int compression_enabled = 0;
+
+	if(find_string_in_parsed_header("Accept-Encoding",lines,maxlines,accept_encoding_singe_val,accept_encoding_multiple_val) == 0) {
+		if(accept_encoding_multiple_val[0] == NULL) {
+			printf("Serach in single value of parsed headers\n");
+			if(search_in_server_supportd_compresion(accept_encoding_singe_val) == 0 ) {
+				memcpy(found,accept_encoding_singe_val,8192);				
+				compression_enabled = 1;					
+			}
+		} else {
+			printf("Serach in multiple values of parsed headers \n");
+			for(int j = 0 ; j < MAX_COMPRESSION_OPTIONS && accept_encoding_multiple_val[j] != NULL ; j++) {
+				char temp_to_compare[8192];	
+				remove_crlf_from_end(accept_encoding_multiple_val[j],temp_to_compare);
+				printf("String to search %s %s \n",temp_to_compare,accept_encoding_multiple_val[j]);
+				if(search_in_server_supportd_compresion(temp_to_compare) == 0 ) {
+					memcpy(found,temp_to_compare,8192);
+					compression_enabled = 1;
+					break;
+				}
+			}
+		}
+	}
+	return compression_enabled;
+}
+void get_response(char *uri,char** lines,int maxlines,char *buf){
 	struct stat st;
 
 	char temp_buf[MAX_BYTES];
@@ -240,79 +280,86 @@ void get_response_for_endpoint(char *uri,char** lines,int maxlines,char *buf){
 
 	if(i == 2 && strcmp(tokens[i-2],"echo") == 0 ) {
 		printf("Echo request recieved \n");
-		char accept_encoding[MAX_BYTES] = {0};
+		
 		int prev_index = 0;
+		success_code = 200;
 		int bytes_written = sprintf(buf+prev_index,"HTTP/1.1 %d OK\r\n",success_code);
 		prev_index += bytes_written;
 		bytes_written = sprintf(buf+prev_index,"Content-Type: text/plain\r\n");
-		int len = strlen(tokens[i-1]);
-		prev_index += bytes_written;
-		bytes_written = sprintf(buf+prev_index,"Content-Length: %d\r\n",len);
 
-		char* comma_sep_vals[10] = {NULL};
-		if(find_string_in_parsed_header("Accept-Encoding",lines,maxlines,accept_encoding,comma_sep_vals) == 0) {
-			if(comma_sep_vals[0] == NULL) {
-				printf("Serach in single value\n");
-				if(search_in_server_supportd_compresion(accept_encoding) == 0 ) {
-				
-					prev_index += bytes_written;
-					bytes_written = sprintf(buf+prev_index,"Content-Encoding: gzip\r\n");
-					printf("Found single matching\n");
-					
-				}
-			} else {
-				printf("Serach in comma seperated list values\n");
-				for(int j = 0 ; j < 10 && comma_sep_vals[j] != NULL ; j++) {
-					char temp_to_compare[8192];	
-					remove_crlf_from_end(comma_sep_vals[j],temp_to_compare);
-					printf("String to search %s %s \n",temp_to_compare,comma_sep_vals[j]);
-					if(search_in_server_supportd_compresion(temp_to_compare) == 0 ) {
-				
-						prev_index += bytes_written;
-						bytes_written = sprintf(buf+prev_index,"Content-Encoding: gzip\r\n");
-						printf("Found breaking\n");
-						break;
-					}
-				}
-			}
+		char accept_encoding_val[8192] = {0};
+		char dst[8192] = {0};
+		int dst_len = 0;
+		if(parse_accept_encoding_header(lines,maxlines,accept_encoding_val) == 1) {
+			printf("Encoding/Compression is enabled\n");
+			prev_index += bytes_written;
+			bytes_written = sprintf(buf+prev_index,"Content-Encoding: %s\r\n",accept_encoding_val);
+
+			gzip_compression(tokens[i-1],dst,&dst_len);
+
+		} else {
+			dst_len = strlen(tokens[i-1]);
+			memcpy(dst,tokens[i-1],dst_len);
+
 		}
+		printf("Buffers and stats dst_buffer %s\n dst_len %d\n",dst,dst_len);
+		prev_index += bytes_written;
+		bytes_written = sprintf(buf+prev_index,"Content-Length: %d\r\n",dst_len);
 		prev_index += bytes_written;
 		bytes_written = sprintf(buf+prev_index,"\r\n");
 		prev_index += bytes_written;
-		bytes_written = sprintf(buf+prev_index,"%s",tokens[i-1]);
-		printf("Final buf %s \nbytes_written %d %s\n",buf,bytes_written,__FUNCTION__);
+		memcpy(buf+prev_index,dst,dst_len);
 		return;
 	}
 
-	
-    
 	if(i >= 1 && strcasecmp(tokens[i-1],"User-agent") == 0) {	
-		printf("User-agent searched\n");
-		handle_user_agent_query(lines,maxlines,buf);
+		printf("User-agent request\n");
+		char found[MAX_BYTES] = {0};
+		success_code = 200;
+		int prev_index = 0;
+		int bytes_written = 0;
+		int len = 0;
+		if(handle_user_agent_query(lines,maxlines,found) == 1 && found != NULL) {
+			bytes_written = sprintf(buf,"HTTP/1.1 %d OK\r\nContent-Type: text/plain\r\n",success_code);
+			prev_index += bytes_written;
+			len = strlen(found);
+			bytes_written = sprintf(buf+prev_index,"Content-Length: %d\r\n\r\n%s",len,found);
+		}
 		return;
-	
 	}
 
 	if(i == 2 && strcmp(tokens[i-2],"files") == 0) {
-		printf("Query for files\n");
-		handle_file_request(tokens[i-1],buf);
+		printf("File content get request\n");
+		int success_code = 404;
+		int prev_index = 0;
+		int bytes_written = 0;
+		int len = 0;
+
+		char file_content[MAX_BYTES] = {0};
+		if(handle_file_get_content_request(tokens[i-1],file_content,&len) == 1) {
+			sprintf(buf,"HTTP/1.1 %d Not Found\r\n\r\n",success_code);
+		} else {
+			success_code = 200;
+			bytes_written = sprintf(buf+prev_index,"HTTP/1.1 %d OK\r\nContent-Type: application/octet-stream\r\n",success_code);
+			prev_index += bytes_written;
+			bytes_written = sprintf(buf+prev_index,"Content-Length: %d\r\n\r\n",len);
+			prev_index += bytes_written;
+			memcpy(buf+prev_index,file_content,len);
+			printf("Final content for file handling buf %s\n len %d\n",buf,len);
+		}
 		return;
 	}
 
-	if(tokens[0] != NULL ) {
-		if(stat(tokens[0],&st) == -1) {
-			printf("Stat read %s %s\n",strerror(errno),__FUNCTION__);
-			success_code = 404;
-			sprintf(buf,"HTTP/1.1 %d Not Found\r\n\r\n",success_code);
-		} else {
-			sprintf(buf,"HTTP/1.1 %d OK\r\n\r\n",success_code);
-		}
-	} 
-	if(i == 0 && tokens[0] == NULL){
-		//Empty directry 
-		printf("Empty directory\n");
+	//Now check the final file, no need to further parrse
+	if(stat(uri,&st) == -1) {
+		printf("File not found %s \n",strerror(errno));
+		success_code = 404;
+		sprintf(buf,"HTTP/1.1 %d Not Found\r\n\r\n",success_code);
+	} else {
+		printf("File found  \n");
 		sprintf(buf,"HTTP/1.1 %d OK\r\n\r\n",success_code);
-	} 
+	}
+	 
 	
 }
 
@@ -364,7 +411,7 @@ void* handle_client_conn(void *args) {
 	char buf_send[MAX_BYTES] = {0};
 	if(strcasecmp(method,"GET") == 0) {
 		printf("Get rquest received\n");
-		get_response_for_endpoint(uri,lines,line,buf_send);
+		get_response(uri,lines,line,buf_send);
 
 	} else if(strcasecmp(method,"POST") == 0) {
 		printf("Post rquest received\n");
